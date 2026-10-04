@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HowToMJ</title>
+  <meta name="description" content="Learn Singapore mahjong: count tai and get discard advice.">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">HowToMJ <span class="brand__zh">麻將</span></div>
+    <div class="top__right">
+      <nav class="tabs" id="tabs" role="tablist"></nav>
+      <button class="chip" id="english" aria-pressed="false" title="Show English names under the tiles">EN names</button>
+    </div>
+  </header>
+
+  <main class="learn" id="learn" hidden></main>
+
+  <main class="play" id="play" hidden></main>
+
+  <main class="layout" id="tools">
+    <section class="card" aria-labelledby="hand-title">
+      <div class="card__head">
+        <h2 id="hand-title">Your hand</h2>
+        <div class="card__actions">
+          <select id="examples" aria-label="Load an example hand"></select>
+          <button class="btn btn--ghost" id="clear">Clear</button>
+        </div>
+      </div>
+      <div id="hand"></div>
+      <p class="message" id="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card card--result" aria-labelledby="result-title">
+      <h2 id="result-title"></h2>
+      <div id="result"></div>
+    </section>
+
+    <section class="card" aria-labelledby="add-title">
+      <h2 id="add-title">Add tiles</h2>
+      <div class="targets" id="targets"></div>
+      <div id="palette"></div>
+    </section>
+
+    <section class="card" aria-labelledby="ctx-title">
+      <h2 id="ctx-title">Table</h2>
+      <div class="context" id="context"></div>
+    </section>
+  </main>
+
+  <footer class="foot">Singapore rules: 1 tai minimum, 5 tai cap. Everyone starts with 300 chips. Chips only, no real money. <a href="tests.html">Engine tests</a></footer>
+
+  <script src="engine.js"></script>
+  <script src="ui.js"></script>
+  <script src="sound.js"></script>
+  <script src="lessons.js"></script>
+  <script src="learn.js"></script>
+  <script src="game.js"></script>
+  <script src="play.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
