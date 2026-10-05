@@ -29,6 +29,7 @@
   let hintFor = null;
   let lastEvent = 0;
   let replay = null; // { idx, auto }
+  let placement = null; // { total, scores: [], recorded }
   let replayTimer = null;
   const bubbles = {};
   let floats = [];
@@ -39,7 +40,7 @@
   const settings = loadSettings();
 
   function loadSettings() {
-    const d = { difficulty: 'beginner', speed: 1.5, manual: true, alwaysHint: false, houseSelfDrawTai: false, allowSevenPairs: true, fei: false };
+    const d = { difficulty: 'beginner', speed: 1.5, manual: true, alwaysHint: false, oneTaiZiMo: false, allowSevenPairs: true, fei: false };
     try { return Object.assign(d, JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}); } catch (e) { return d; }
   }
   function saveSettings() {
@@ -48,10 +49,10 @@
 
   // ---------- Loop ----------
 
-  function newGame() {
+  function newGame(forPlacement) {
     game = new Game({
-      manual: settings.manual, difficulty: settings.difficulty,
-      houseSelfDrawTai: settings.houseSelfDrawTai, allowSevenPairs: settings.allowSevenPairs, fei: settings.fei,
+      manual: forPlacement ? false : settings.manual, difficulty: forPlacement ? 'intermediate' : settings.difficulty,
+      oneTaiZiMo: settings.oneTaiZiMo, allowSevenPairs: settings.allowSevenPairs, fei: settings.fei,
     });
     lastEvent = 0;
     setupOpen = false;
@@ -61,7 +62,7 @@
   function startHand() {
     stopReplay();
     replay = null;
-    game.setManual(settings.manual);
+    game.setManual(placement ? false : settings.manual);
     game.startHand();
     resetTurnUi();
     renderSettings();
@@ -219,7 +220,7 @@
           el('h3', { text: 'House rules' }),
           check('Fei 飛 jokers', settings.fei, (on) => { settings.fei = on; saveSettings(); }, '— adds 4 wild tiles that can stand in for any tile in a set or the pair (152 tiles).'),
           check('Seven Pairs 七對子 allowed', settings.allowSevenPairs, (on) => { settings.allowSevenPairs = on; saveSettings(); }),
-          check('一台自摸: self-draw earns +1 tai', settings.houseSelfDrawTai, (on) => { settings.houseSelfDrawTai = on; saveSettings(); }, '(not played at every table)'),
+          check('一台自摸 (Yī Tái Zì Mō): a hand worth only 1 tai must be self-drawn to win', settings.oneTaiZiMo, (on) => { settings.oneTaiZiMo = on; saveSettings(); }, '(not played at every table)'),
           el('p', { class: 'muted', text: 'Always: 1 tai minimum, 5 tai cap, 300 chips each.' }),
         ]),
       ]),
@@ -235,7 +236,7 @@
   // ---------- In-game options ----------
 
   function optionsPanel() {
-    const rules = [settings.fei ? 'Fei 飛 jokers' : null, settings.allowSevenPairs ? 'Seven Pairs' : 'No Seven Pairs', settings.houseSelfDrawTai ? '一台自摸' : null].filter(Boolean).join(' · ');
+    const rules = [settings.fei ? 'Fei 飛 jokers' : null, settings.allowSevenPairs ? 'Seven Pairs' : 'No Seven Pairs', settings.oneTaiZiMo ? '一台自摸' : null].filter(Boolean).join(' · ');
     return el('details', { class: 'settings' }, [
       el('summary', { text: '⚙ Options · ' + LEVELS[settings.difficulty].label + ' · ' + settings.speed.toFixed(1) + ' s' + (settings.manual ? ' · Manual' : '') + (settings.alwaysHint ? ' · Hints on' : '') }),
       el('div', { class: 'settings__grid' }, [
@@ -265,9 +266,9 @@
 
   function statusBar() {
     return el('div', { class: 'table-bar' }, [
-      el('span', {}, [el('strong', { text: 'Hand ' + game.handNo }), ' · Round wind ' + windName(game.prevalent)]),
+      el('span', {}, [el('strong', { text: placement ? '🀄 Placement match · hand ' + game.handNo + ' of ' + placement.total : 'Hand ' + game.handNo }), ' · Round wind ' + windName(game.prevalent)]),
       canFullscreen() ? el('button', { class: 'btn btn--ghost fs-btn', onclick: toggleFullscreen, title: isFullscreen() ? 'Exit full screen (Esc)' : 'Play in full screen', text: isFullscreen() ? '✕ Exit full screen' : '⛶ Full screen' }) : null,
-      el('button', { class: 'btn btn--ghost', onclick: () => { if (confirm('Start a new game? Everyone goes back to 300 chips.')) { game = null; stopReplay(); clearTimeout(timer); setupOpen = true; renderSetup(); } }, text: 'New game' }),
+      el('button', { class: 'btn btn--ghost', onclick: () => { if (confirm('Start a new game? Everyone goes back to 300 chips.')) { game = null; placement = null; stopReplay(); clearTimeout(timer); setupOpen = true; renderSetup(); } }, text: 'New game' }),
     ]);
   }
 
@@ -418,7 +419,7 @@
 
   function ensureAutoHint() {
     const key = game.phase + ':' + game.turnCount + ':' + (game.pending ? game.pending.tile + game.pending.from : '');
-    if (settings.alwaysHint && (game.phase === 'humanTurn' || game.phase === 'humanClaim') && hintFor !== key) {
+    if (!placement && settings.alwaysHint && (game.phase === 'humanTurn' || game.phase === 'humanClaim') && hintFor !== key) {
       hintShown = game.hint();
       hintFor = key;
     }
@@ -427,7 +428,7 @@
   function actionBar() {
     const items = [];
     const buttons = [];
-    const hintBtn = settings.alwaysHint ? null : el('button', { class: 'btn', onclick: () => { hintShown = game.hint(); render(); }, text: 'Hint' });
+    const hintBtn = settings.alwaysHint || placement ? null : el('button', { class: 'btn', onclick: () => { hintShown = game.hint(); render(); }, text: 'Hint' });
     const big = (text, onclick) => el('button', { class: 'btn btn--primary btn--big', onclick, text });
 
     switch (game.phase) {
@@ -536,7 +537,65 @@
     return el('div', { class: 'review' }, [el('h3', { text: 'Your review: how you could have won earlier' }), el('ul', {}, lines)]);
   }
 
+  // ---------- Placement match: the bots judge your play ----------
+
+  const PLACEMENT_LEVELS = [
+    { min: 90, skip: 9, label: 'Expert', text: 'You play like a seasoned player. Lessons 1–9 are marked done: jump to house rules, or straight into games.' },
+    { min: 75, skip: 7, label: 'Strong player', text: 'Solid play. Lessons 1–7 are marked done: carry on with Defence.' },
+    { min: 60, skip: 5, label: 'Player', text: 'You know the game. Lessons 1–5 are marked done: carry on with Waits and Ka Long.' },
+    { min: 45, skip: 3, label: 'Learner', text: 'You know the basics. Lessons 1–3 are marked done: carry on with How a game flows.' },
+    { min: 0, skip: 0, label: 'Beginner', text: 'Start from Lesson 1 — it will make the rest much easier.' },
+  ];
+
+  /** Scores one hand out of 100 from your discards, claims and result. */
+  function assessHand() {
+    const ds = game.decisions;
+    const disc = ds.filter((d) => d.kind === 'discard');
+    const good = disc.filter((d) => d.chosen === d.best || (d.chosenOpt && d.bestOpt && d.chosenOpt.shanten === d.bestOpt.shanten && d.chosenOpt.live >= d.bestOpt.live - 4)).length;
+    const accuracy = disc.length ? good / disc.length : 0.5;
+    const claims = ds.filter((d) => d.kind === 'claim' && !d.couldWin);
+    const claimGood = claims.length ? claims.filter((d) => d.chosen === d.suggestion).length / claims.length : 1;
+    const missed = ((game.result.review || {}).items || []).filter((i) => i.type === 'missedWin').length;
+    const won = game.result.type === 'win' && game.result.winner === game.viewer;
+    const shot = game.result.type === 'win' && game.result.shooter === game.viewer;
+    const score = Math.max(0, Math.min(100, Math.round(65 * accuracy + 15 * claimGood + (won ? 20 : 0) - (shot ? 5 : 0) - 15 * missed)));
+    return { score, accuracy, good, discards: disc.length, claimGood, claims: claims.length, missed, won, shot };
+  }
+
+  function placementCard() {
+    if (!placement.recorded) { placement.scores.push(assessHand()); placement.recorded = true; }
+    const a = placement.scores[placement.scores.length - 1];
+    const lines = [
+      'Discards: ' + a.good + ' of ' + a.discards + ' matched a strong player (' + Math.round(a.accuracy * 100) + '%)',
+      a.claims ? 'Claims: ' + Math.round(a.claimGood * 100) + '% good calls on Pong / Chi' : 'Claims: none needed',
+      a.won ? 'You won the hand! (+20)' : a.shot ? 'You threw the winning tile (−5)' : 'You did not win this hand',
+      a.missed ? 'Missed wins: ' + a.missed + ' (−15 each)' : 'No missed wins',
+    ];
+    const out = [el('h2', { text: '🀄 Placement hand ' + placement.scores.length + ' of ' + placement.total + ': ' + a.score + '/100' }), el('ul', { class: 'mini-lines' }, lines.map((l) => el('li', { text: l })))];
+    if (placement.scores.length < placement.total) {
+      out.push(el('div', { class: 'actions' }, [el('button', { class: 'btn btn--primary btn--big', onclick: () => { placement.recorded = false; startHand(); }, text: 'Next placement hand' })]));
+    } else {
+      const avg = Math.round(placement.scores.reduce((t, x) => t + x.score, 0) / placement.scores.length);
+      const level = PLACEMENT_LEVELS.find((l) => avg >= l.min);
+      out.push(el('div', { class: 'placement-result' }, [
+        el('div', { class: 'big' }, [el('span', { class: 'big__num', text: String(avg) }), el('span', { class: 'big__unit', text: '/100 · ' + level.label })]),
+        el('p', { text: level.text }),
+      ]));
+      out.push(el('div', { class: 'actions' }, [
+        el('button', { class: 'btn btn--primary btn--big', onclick: () => { const n = level.skip; placement = null; game = null; setupOpen = true; window.Learn.applyPlacement(n); window.HowToMJ.setMode('learn'); }, text: level.skip ? 'Skip ahead: go to my lessons' : 'Go to Lesson 1' }),
+        el('button', { class: 'btn btn--big', onclick: () => { placement = { total: 2, scores: [], recorded: false }; newGame(true); }, text: 'Try the placement again' }),
+      ]));
+    }
+    return el('section', { class: 'card result-panel placement-panel' }, out);
+  }
+
   function resultCard() {
+    const r = game.result;
+    if (placement) return el('div', { class: 'placement-wrap' }, [placementCard(), resultDetails()]);
+    return resultDetails();
+  }
+
+  function resultDetails() {
     const r = game.result;
     const out = [];
     if (r.type === 'win') {
@@ -690,6 +749,12 @@
       tick();
     },
     hide() { active = false; clearTimeout(timer); stopReplay(); },
+    /** Placement match: 2 hands vs intermediate bots, hints and manual play off. */
+    startPlacement() {
+      placement = { total: 2, scores: [], recorded: false };
+      active = true;
+      newGame(true);
+    },
     render() { if (game && !setupOpen) render(); else if (setupOpen && boardHost) renderSetup(); },
   };
 })();

@@ -43,9 +43,9 @@
 
   test('Pong Pong + Green Dragon + Men Qing, self-draw = 4 tai, 12 from each', () => {
     const r = MJ.evaluateHand(hand('b1 b1 b1 d5 d5 d5 c9 c9 c9 hG hG wN wN', 'hG', { selfDraw: true }));
-    eq(r.tai, 4); eq(names(r), ['對對胡', '發', '門清'].sort());
+    eq(r.tai, 4); eq(names(r), ['對對胡', '發碰', '門清'].sort());
     eq(r.payout, { selfDraw: true, each: 12, total: 36 });
-    ok(r.items.some((i) => i.name === 'Green Dragon Pong'), 'capitalised name');
+    ok(r.items.some((i) => i.name.includes('Green Dragon Pong') && i.name.includes('Qīng Fā')), 'pinyin + English name');
   });
 
   test('Exposed sets: Pong Pong + Green Dragon = 3 tai, no Men Qing', () => {
@@ -92,10 +92,14 @@
     eq(MJ.evaluateHand(Object.assign({}, h, { afterBonus: true, selfDraw: false })).tai, 0);
   });
 
-  test('House rule 一台自摸: self-draw earns +1 tai when switched on', () => {
+  test('House rule 一台自摸: a 1-tai hand can only win by self-draw', () => {
     const h = hand('b4 b5 b6 d2 d3 d4 c5 c6 c7 c9', 'c9', { melds: [chow('b1')], selfDraw: true });
     eq(MJ.evaluateHand(h).tai, 0);
-    eq(MJ.evaluateHand(h, Object.assign({}, MJ.RULES, { houseSelfDrawTai: true })).tai, 1);
+    const r1 = Object.assign({}, MJ.RULES, { oneTaiZiMo: true });
+    const one = hand('b1 b2 b3 b4 b5 b6 d2 d3 d4 c9', 'c9', { melds: [pong('hR')] });
+    eq(MJ.evaluateHand(one, r1).canWin, false, '1 tai off a discard');
+    eq(MJ.evaluateHand(Object.assign({}, one, { selfDraw: true }), r1).canWin, true, '1 tai self-drawn');
+    eq(MJ.evaluateHand(hand('b1 b2 b3 b4 b5 b6 d2 d3 d4 c9', 'c9', { melds: [pong('wE')] }), r1).canWin, true, '2 tai off a discard')
   });
 
   // ---- Ka Long, Hai Di Lao, Si Xi, Seven Pairs switch ----
@@ -151,6 +155,18 @@
     const r = MJ.adviseDiscard(hand('b1 b2 jF d4 d5 d7 c7 c8 c2 c2 wN b5 hG', 'wS'));
     eq(r.status, 'ok');
     ok(r.options.every((o) => !MJ.isFei(o.tile)));
+  });
+
+  test('Xiao San Yuan 小三元: two dragon pongs + a dragon pair = 4 tai', () => {
+    const r = MJ.evaluateHand(hand('hR hR hR hG hG hG hW b1 b2 b3 d5 d6 d7', 'hW', { melds: [] }));
+    ok(names(r).includes('小三元')); ok(!names(r).includes('中碰'), 'dragon pongs not double counted');
+    eq(r.items.find((i) => i.zh === '小三元').tai, 4);
+  });
+
+  test('describeSets splits a hand into labelled sets', () => {
+    const g = MJ.describeSets(hand('b1 b2 b3 b4 b5 b6 d2 d3 d4 c5 c6 c9 c9', 'c7'));
+    eq(g.map((x) => x.type), ['chi', 'chi', 'chi', 'chi', 'pair']);
+    eq(MJ.describeSets(hand('b1 b3 b5 b7 b9 d1 d3 d5 d7 d9 c1 c3 c5', 'c7')), null);
   });
 
   // ---- Special hands ----
@@ -277,6 +293,24 @@
       }
       ok(differs, 'quiz never changed');
     });
+  });
+
+  test('Set Builder recognises chi, pong and pair', () => {
+    const c = window.MiniGames.classify;
+    eq(c(['b3', 'b1', 'b2']), 'chi'); eq(c(['hR', 'hR', 'hR']), 'pong'); eq(c(['d5', 'd5']), 'pair');
+    eq(c(['b1', 'b2', 'd3']), null); eq(c(['wE', 'wS', 'wW']), null);
+  });
+
+  test('Every lesson has a mini game', () => {
+    window.LESSONS.forEach((l) => ok(window.MiniGames.info(l.id), l.id + ' has no mini game'));
+  });
+
+  test('Every wind in lesson text carries its character', () => {
+    const texts = [];
+    const walk = (o) => { if (typeof o === 'string') texts.push(o); else if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object' && !o.noWindChars) Object.keys(o).forEach((k) => { if (k !== 'tiles' && k !== 'hand') walk(o[k]); }); };
+    window.LESSONS.forEach((l) => { walk(l.cards); walk(l.quiz); });
+    const bare = texts.filter((s) => /\b(East|South|West|North)\b(?!\s*[東南西北])/.test(s));
+    eq(bare, []);
   });
 
   test('Lesson 2 no longer asks about tai before it is taught', () => {

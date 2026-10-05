@@ -99,11 +99,11 @@
   class Game {
     /**
      * opts: { seed, allBots, manual, difficulty: 'beginner'|'intermediate'|'expert',
-     *         houseSelfDrawTai, allowSevenPairs, fei }
+     *         oneTaiZiMo, allowSevenPairs, fei }
      */
     constructor(opts) {
       opts = opts || {};
-      this.rules = Object.assign({}, MJ.RULES, { houseSelfDrawTai: !!opts.houseSelfDrawTai, allowSevenPairs: opts.allowSevenPairs !== false });
+      this.rules = Object.assign({}, MJ.RULES, { oneTaiZiMo: !!opts.oneTaiZiMo, allowSevenPairs: opts.allowSevenPairs !== false });
       this.fei = !!opts.fei;
       this.rand = opts.seed !== undefined ? seededRandom(opts.seed) : Math.random;
       this.manual = !!opts.manual && !opts.allBots;
@@ -126,7 +126,7 @@
 
     // ---------- Settings ----------
 
-    setHouseSelfDrawTai(on) { this.rules = Object.assign({}, this.rules, { houseSelfDrawTai: !!on }); }
+    setOneTaiZiMo(on) { this.rules = Object.assign({}, this.rules, { oneTaiZiMo: !!on }); }
     setDifficulty(d) { this.difficulty = d; }
 
     /** Manual dealing and drawing. Switching it off mid-hand finishes any step you were asked to do. */
