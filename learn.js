@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const MJ = window.MJ;
-  const { el, tileEl, handEl } = window.UI;
+  const { el, tileEl, handEl, setsEl } = window.UI;
   const LESSONS = window.LESSONS;
   const RULES = MJ.RULES;
   const STORAGE_KEY = 'howtomj.learn.v1';
@@ -31,12 +31,17 @@
 
   /** A fresh quiz: fixed questions plus newly generated ones, shuffled, with shuffled answer options. */
   function buildQuiz(lesson) {
+    const keyOf = (q) => q.prompt + '|' + (q.tiles || []).join() + '|' + (q.hand ? q.hand.concealed.join() + q.hand.winningTile : '');
     const candidates = lesson.quiz.slice();
-    (lesson.generators || []).forEach((g) => { const q = g(Math.random); if (q) candidates.push(q); });
+    // Keep generating until there are enough different questions to fill the quiz.
+    for (let round = 0; round < 6; round++) {
+      (lesson.generators || []).forEach((g) => { const q = g(Math.random); if (q) candidates.push(q); });
+      if (new Set(candidates.map(keyOf)).size >= quizCount(lesson) + 2) break;
+    }
     const seen = new Set();
     const picked = [];
     shuffled(candidates).forEach((q) => {
-      const key = q.prompt + '|' + (q.tiles || []).join() + '|' + (q.hand ? q.hand.concealed.join() + q.hand.winningTile : '');
+      const key = keyOf(q);
       if (picked.length < quizCount(lesson) && !seen.has(key)) { seen.add(key); picked.push(prepare(q)); }
     });
     return picked;
@@ -68,7 +73,7 @@
     if (q.type === 'tile') return { options: q.options.map((tile) => ({ tile })), answer: q.options.indexOf(q.answer) };
     const r = MJ.evaluateHand(q.hand, RULES);
     const breakdown = r.status === 'ok'
-      ? (r.items.length ? r.items.map((i) => i.name + ' ' + i.zh + ' +' + i.tai).join(', ') + ' = ' + (r.rawTai > r.tai ? r.rawTai + ', capped at ' + r.tai : r.tai) + ' tai.' : 'Nothing scores: 0 tai.')
+      ? (r.items.length ? r.items.map((i) => i.name + ' ' + i.zh + ' +' + i.tai).join(', ') + ' = ' + (r.rawTai > r.tai ? r.rawTai + ', capped at ' + r.tai : r.tai) + ' tai' + (r.tai >= RULES.maxTai ? ' — Mǎn 滿 (full)!' : '.') : 'Nothing scores: 0 tai.')
       : '';
     if (q.type === 'win') {
       const yes = q.mode === 'canWin' ? r.status === 'ok' && r.canWin : r.status === 'ok';
@@ -126,8 +131,14 @@
 
   function render() {
     if (!container) return;
+    if (view.name === 'mini') {
+      const host = el('div', { class: 'mini-host' });
+      container.replaceChildren(host);
+      window.MiniGames.start(host, LESSONS[view.lesson], () => go({ name: 'list' }));
+      return;
+    }
     const views = { list: listView, lesson: lessonView, quiz: quizView, result: resultView };
-    container.replaceChildren(...views[view.name]());
+    container.replaceChildren(...views[view.name]().filter(Boolean));
   }
 
   function listView() {
@@ -140,11 +151,22 @@
           el('span', { style: 'width:' + (done / LESSONS.length) * 100 + '%' }),
         ]),
       ]),
+      done < LESSONS.length - 1 ? el('section', { class: 'card placement-card' }, [
+        el('div', {}, [
+          el('strong', { text: 'Already play mahjong? Take the placement match.' }),
+          el('p', { class: 'muted', text: 'Play 2 hands against the bots. They judge your discards, claims and wins, and you skip the lessons you clearly already know.' }),
+        ]),
+        el('button', { class: 'btn btn--primary', onclick: () => window.HowToMJ && window.HowToMJ.startPlacement(), text: '🀄 Start placement match' }),
+      ]) : null,
       el('ol', { class: 'lesson-list' }, LESSONS.map((l, i) => {
         const p = progress[l.id];
         const open = isUnlocked(i);
-        const status = p && p.passed ? 'Passed · best ' + p.best + '/' + p.total : open ? l.minutes + ' min · ' + quizCount(l) + ' quiz questions, new each try' : 'Pass Lesson ' + i + ' to unlock';
-        return el('li', {}, [el('button', {
+        const status = p && p.placement ? 'Skipped by your placement match' : p && p.passed ? 'Passed · best ' + p.best + '/' + p.total : open ? l.minutes + ' min · ' + quizCount(l) + ' quiz questions, new each try' : 'Pass Lesson ' + i + ' to unlock';
+        const mini = window.MiniGames && window.MiniGames.info(l.id);
+        const miniBtn = mini && p && p.passed ? el('button', { class: 'mini-launch', onclick: () => go({ name: 'mini', lesson: i }), title: mini.desc }, [
+          el('span', { text: '🎮 ' + mini.name }), window.MiniGames.best(l.id) ? el('span', { class: 'muted', text: ' · best ' + window.MiniGames.best(l.id) }) : null,
+        ]) : null;
+        return el('li', { class: 'lesson-row' }, [miniBtn, el('button', {
           class: 'lesson-item' + (p && p.passed ? ' is-done' : '') + (open ? '' : ' is-locked'),
           disabled: !open,
           onclick: () => openLesson(i),
@@ -183,7 +205,7 @@
     ])));
     (card.hands || []).forEach((h) => out.push(el('div', { class: 'lesson-group' }, [
       el('div', { class: 'hand-row__label', text: h.label }),
-      handEl(h.hand, { small: true }),
+      setsEl(h.hand, { small: true }),
     ])));
     if (card.taiList) {
       out.push(el('ul', { class: 'tai-list' }, card.taiList.map((x) => el('li', { class: 'tai-item' }, [
@@ -259,6 +281,8 @@
         el('strong', { text: right ? 'Correct!' : 'Not quite.' }),
         el('span', { text: ' ' + (res.explain || q.explain || '') }),
       ]));
+      // After answering, show the hand split into its sets with each move named above the tiles.
+      if (q.hand && MJ.describeSets(q.hand)) body.push(el('div', { class: 'lesson-group' }, [el('div', { class: 'hand-row__label', text: 'How the hand splits up' }), setsEl(q.hand, { small: true })]));
     }
 
     return [
@@ -278,6 +302,8 @@
     const actions = [];
     if (view.passed && next !== null) actions.push(el('button', { class: 'btn btn--primary', onclick: () => openLesson(next), text: 'Next: ' + LESSONS[next].title }));
     if (view.passed && next === null) actions.push(el('button', { class: 'btn btn--primary', onclick: () => window.HowToMJ && window.HowToMJ.setMode('play'), text: 'Play a practice game' }));
+    const mini = window.MiniGames && window.MiniGames.info(lesson.id);
+    if (view.passed && mini) actions.push(el('button', { class: 'btn btn--primary', onclick: () => go({ name: 'mini', lesson: view.lesson }), text: '🎮 Practise it: ' + mini.name }));
     actions.push(el('button', { class: 'btn' + (view.passed ? '' : ' btn--primary'), onclick: () => startQuiz(view.lesson), text: 'Retry the quiz' }));
     actions.push(el('button', { class: 'btn', onclick: () => openLesson(view.lesson), text: 'Review the lesson' }));
 
@@ -301,5 +327,16 @@
     render,
     resolve, // exposed for tests
     buildQuiz,
+    prepare,
+    /** Marks the first n lessons as done after a placement match. */
+    applyPlacement(n) {
+      LESSONS.slice(0, n).forEach((l) => {
+        const prev = progress[l.id];
+        if (!(prev && prev.passed && !prev.placement)) progress[l.id] = { best: 0, total: 0, passed: true, placement: true };
+      });
+      saveProgress();
+      view = { name: 'list' };
+      render();
+    },
   };
 })();

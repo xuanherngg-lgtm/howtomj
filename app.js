@@ -35,8 +35,8 @@
   ];
 
   const blank = () => ({ concealed: [], winningTile: null, melds: [], bonus: [], selfDraw: false, bonusAtStart: false, afterBonus: false, lastTile: false, guess: null });
-  const defaults = () => Object.assign({ mode: 'learn', target: 'hand', seat: 'E', prevalent: 'E', learning: false, houseSelfDrawTai: false }, blank());
-  const rules = () => Object.assign({}, RULES, { houseSelfDrawTai: !!state.houseSelfDrawTai });
+  const defaults = () => Object.assign({ mode: 'learn', target: 'hand', seat: 'E', prevalent: 'E', learning: false, oneTaiZiMo: false }, blank());
+  const rules = () => Object.assign({}, RULES, { oneTaiZiMo: !!state.oneTaiZiMo });
 
   let state = load();
   let message = '';
@@ -263,8 +263,8 @@
         ]));
       }
       items.push(el('label', { class: 'check' }, [
-        el('input', { type: 'checkbox', checked: state.houseSelfDrawTai, onchange: (e) => update({ houseSelfDrawTai: e.target.checked }) }),
-        'House rule 一台自摸: self-draw +1 tai',
+        el('input', { type: 'checkbox', checked: state.oneTaiZiMo, onchange: (e) => update({ oneTaiZiMo: e.target.checked }) }),
+        'House rule 一台自摸 (Yī Tái Zì Mō): a 1-tai hand must be self-drawn',
       ]));
     } else {
       items.push(el('label', { class: 'check' }, [
@@ -386,7 +386,11 @@
   enBtn.addEventListener('click', () => { window.UI.setEnglish(!window.UI.englishOn()); syncEnglish(); window.Play.render(); });
   syncEnglish();
 
-  window.HowToMJ = { setMode: (mode) => { update({ mode }); window.scrollTo(0, 0); }, syncEnglish };
+  window.HowToMJ = {
+    setMode: (mode) => { update({ mode }); window.scrollTo(0, 0); },
+    syncEnglish,
+    startPlacement: () => { update({ mode: 'play' }); window.Play.startPlacement(); window.scrollTo(0, 0); },
+  };
   window.Learn.mount(document.getElementById('learn'));
   window.Play.mount(document.getElementById('play'));
   render();

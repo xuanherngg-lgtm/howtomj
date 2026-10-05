@@ -166,6 +166,18 @@
     return el('div', { class: 'hand-view' }, parts);
   }
 
+  const SET_LABELS = { chi: 'Chī 吃 · Chi', pong: 'Pèng 碰 · Pong', kong: 'Gàng 槓 · Kong', pair: 'Yǎn 眼 · Pair', wonders: 'Shí Sān Yāo 十三幺 · Thirteen Wonders' };
+
+  /** A complete hand shown set by set, with the move's name above each group of tiles. Falls back to a plain hand. */
+  function setsEl(hand, opts) {
+    const groups = MJ.describeSets(hand);
+    if (!groups) return handEl(hand, opts);
+    return el('div', { class: 'sets-view' }, groups.map((g) => el('div', { class: 'set-group' + (g.revealed ? ' is-revealed' : '') }, [
+      el('span', { class: 'set-group__label', text: SET_LABELS[g.type] + (g.revealed ? ' (revealed)' : '') }),
+      el('span', { class: 'tile-row' }, g.tiles.map((id) => tileEl(id, { small: true, extra: hand.winningTile === id && !g.revealed ? 'is-winning' : '' }))),
+    ])));
+  }
+
   // ---------- English captions (a global, remembered setting) ----------
 
   const EN_KEY = 'howtomj.english.v1';
@@ -182,5 +194,5 @@
   /** "South 南" — every wind name in the UI carries its character. */
   const windName = (w) => WIND_EN[w] + ' ' + WIND_ZH[w];
 
-  window.UI = { el, tileEl, emptyTile, handEl, faceSvg, englishOn, setEnglish, windName, WIND_ZH, WIND_EN };
+  window.UI = { el, tileEl, emptyTile, handEl, setsEl, faceSvg, englishOn, setEnglish, windName, WIND_ZH, WIND_EN };
 })();

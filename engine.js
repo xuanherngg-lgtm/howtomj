@@ -34,10 +34,10 @@
       huaShang: 1,
       kaLong: 1, // only on a self-draw
       haiDiLao: 1, // only on a self-draw of the last tile
-      selfDraw: 1, // only when houseSelfDrawTai is on
+      xiaoSanYuan: 4, // two dragon pongs + a dragon pair (replaces the two dragon-pong tai)
     },
-    // House rule 一台自摸: a self-drawn win earns 1 extra tai.
-    houseSelfDrawTai: false,
+    // House rule 一台自摸 (Yī Tái Zì Mō): a hand worth only 1 tai can only be won by drawing it yourself.
+    oneTaiZiMo: false,
     // House rule: some houses do not play Seven Pairs.
     allowSevenPairs: true,
     limitHands: ['thirteenWonders', 'bigThreeDragons', 'bigFourWinds', 'smallFourWinds', 'allHonours', 'nineGates', 'heavenlyHand', 'earthlyHand'],
@@ -68,15 +68,15 @@
     c: { en: 'Characters', short: 'Char', zh: '萬' },
   };
   const WIND_INFO = {
-    E: { en: 'East', zh: '東' },
-    S: { en: 'South', zh: '南' },
-    W: { en: 'West', zh: '西' },
-    N: { en: 'North', zh: '北' },
+    E: { en: 'East', zh: '東', py: 'Dōng' },
+    S: { en: 'South', zh: '南', py: 'Nán' },
+    W: { en: 'West', zh: '西', py: 'Xī' },
+    N: { en: 'North', zh: '北', py: 'Běi' },
   };
   const DRAGON_INFO = {
-    R: { en: 'Red Dragon', short: 'Red', zh: '中' },
-    G: { en: 'Green Dragon', short: 'Green', zh: '發' },
-    W: { en: 'White Dragon', short: 'White', zh: '白' },
+    R: { en: 'Red Dragon', short: 'Red', zh: '中', py: 'Hóng Zhōng' },
+    G: { en: 'Green Dragon', short: 'Green', zh: '發', py: 'Qīng Fā' },
+    W: { en: 'White Dragon', short: 'White', zh: '白', py: 'Bái Bǎn' },
   };
   // Flowers come in two colours: red 梅蘭菊竹 and blue 春夏秋冬, each numbered 1–4.
   // (Internally the blue set keeps the kind 'season'.)
@@ -127,10 +127,10 @@
       }
       if (i < 31) {
         const w = id[1];
-        return { id, kind: 'wind', wind: w, en: WIND_INFO[w].en, name: WIND_INFO[w].en + ' Wind', zh: WIND_INFO[w].zh };
+        return { id, kind: 'wind', wind: w, en: WIND_INFO[w].en, name: WIND_INFO[w].en + ' Wind', zh: WIND_INFO[w].zh, py: WIND_INFO[w].py };
       }
       const d = id[1];
-      return { id, kind: 'dragon', dragon: d, en: DRAGON_INFO[d].short, name: DRAGON_INFO[d].en, zh: DRAGON_INFO[d].zh };
+      return { id, kind: 'dragon', dragon: d, en: DRAGON_INFO[d].short, name: DRAGON_INFO[d].en, zh: DRAGON_INFO[d].zh, py: DRAGON_INFO[d].py };
     }
     if (isBonus(id)) {
       const b = BONUS_INFO[id];
@@ -141,7 +141,7 @@
     throw new Error('Unknown tile: ' + id);
   }
 
-  const tileName = (id) => { const t = tileInfo(id); return t.name + ' (' + t.zh + ')'; };
+  const tileName = (id) => { const t = tileInfo(id); return t.name + ' (' + t.zh + (t.py ? ' ' + t.py : '') + ')'; };
   const sortTiles = (ids) => ids.slice().sort((a, b) => order(a) - order(b));
   function order(id) {
     if (isPlayable(id)) return INDEX[id];
@@ -269,8 +269,8 @@
     const col = colourInfo(indices);
     if (col.suits.size !== 1) return [];
     const suit = SUIT_INFO[SUITS[[...col.suits][0]]];
-    if (col.honours) return [item('Half Colour: ' + suit.en + ' + honours', '混一色', rules.tai.halfColour)];
-    return [item('Full Colour: all ' + suit.en, '清一色', rules.tai.fullColour)];
+    if (col.honours) return [item('Hùn Yī Sè · Half Colour: ' + suit.en + ' + honours', '混一色', rules.tai.halfColour)];
+    return [item('Qīng Yī Sè · Full Colour: all ' + suit.en, '清一色', rules.tai.fullColour)];
   }
 
   function bonusItems(bonus, seat, rules) {
@@ -279,40 +279,39 @@
     sortTiles(bonus).forEach((id) => {
       const b = BONUS_INFO[id];
       if ((b.kind === 'flower' || b.kind === 'season') && b.num === n) {
-        items.push(item('Your Flower: ' + b.en + ' (' + b.colour + ' ' + b.num + ')', b.zh, rules.tai.seatFlower));
+        items.push(item('Zhèng Huā · Your Flower: ' + b.en + ' (' + b.colour + ' ' + b.num + ')', '正花 ' + b.zh, rules.tai.seatFlower));
       }
-      if (b.kind === 'animal') items.push(item('Animal: ' + b.en, b.zh, rules.tai.animal));
+      if (b.kind === 'animal') items.push(item('Dòng Wù · Animal: ' + b.en, '動物 ' + b.zh, rules.tai.animal));
     });
-    if (['f1', 'f2', 'f3', 'f4'].every((f) => bonus.includes(f))) items.push(item('All 4 Red Flowers', '梅蘭菊竹', rules.tai.flowerSet));
-    if (['s1', 's2', 's3', 's4'].every((s) => bonus.includes(s))) items.push(item('All 4 Blue Flowers', '春夏秋冬', rules.tai.flowerSet));
+    if (['f1', 'f2', 'f3', 'f4'].every((f) => bonus.includes(f))) items.push(item('Yī Tào Huā · All 4 Red Flowers', '一套花', rules.tai.flowerSet));
+    if (['s1', 's2', 's3', 's4'].every((s) => bonus.includes(s))) items.push(item('Yī Tào Huā · All 4 Blue Flowers', '一套花', rules.tai.flowerSet));
     return items;
   }
 
   /** Tai that apply to any hand shape: concealed hand, flower replacement win, house self-draw rule. */
   function contextItems(ctx, rules) {
     const items = [];
-    if (ctx.concealedHand) items.push(item('Men Qing: no exposed sets', '門清', rules.tai.menQing));
-    if (ctx.afterBonus && ctx.selfDraw) items.push(item('Hua Shang: won on a flower replacement tile', '花上', rules.tai.huaShang));
-    if (ctx.lastTile && ctx.selfDraw) items.push(item('Hai Di Lao: self-drew the last tile of the wall', '海底撈月', rules.tai.haiDiLao));
-    if (rules.houseSelfDrawTai && ctx.selfDraw) items.push(item('Zi Mo: self-draw (house rule 一台自摸)', '自摸', rules.tai.selfDraw));
+    if (ctx.concealedHand) items.push(item('Mén Qīng · Concealed Hand: no revealed sets', '門清', rules.tai.menQing));
+    if (ctx.afterBonus && ctx.selfDraw) items.push(item('Huā Shàng · Win on a Flower Replacement', '花上', rules.tai.huaShang));
+    if (ctx.lastTile && ctx.selfDraw) items.push(item('Hǎi Dǐ Lāo Yuè · Win on the Last Tile of the Wall', '海底撈月', rules.tai.haiDiLao));
     return items;
   }
 
   const LIMIT_NAMES = {
-    thirteenWonders: ['Thirteen Wonders', '十三幺'],
-    bigThreeDragons: ['Da San Yuan (Big Three Dragons)', '大三元'],
-    bigFourWinds: ['Da Si Xi (Big Four Winds)', '大四喜'],
-    smallFourWinds: ['Xiao Si Xi (Small Four Winds)', '小四喜'],
-    allHonours: ['All Honours', '字一色'],
-    nineGates: ['Nine Gates', '九蓮寶燈'],
-    heavenlyHand: ['Heavenly Hand', '天胡'],
-    earthlyHand: ['Earthly Hand', '地胡'],
+    thirteenWonders: ['Shí Sān Yāo · Thirteen Wonders', '十三幺'],
+    bigThreeDragons: ['Dà Sān Yuán · Big Three Dragons', '大三元'],
+    bigFourWinds: ['Dà Sì Xǐ · Big Four Winds', '大四喜'],
+    smallFourWinds: ['Xiǎo Sì Xǐ · Small Four Winds', '小四喜'],
+    allHonours: ['Zì Yī Sè · All Honours', '字一色'],
+    nineGates: ['Jiǔ Lián Bǎo Dēng · Nine Gates', '九蓮寶燈'],
+    heavenlyHand: ['Tiān Hú · Heavenly Hand', '天胡'],
+    earthlyHand: ['Dì Hú · Earthly Hand', '地胡'],
   };
 
   function limitResult(keys, rules) {
     const allowed = keys.filter((k) => rules.limitHands.includes(k));
     if (!allowed.length) return null;
-    return { limit: true, items: allowed.map((k) => item('Limit hand: ' + LIMIT_NAMES[k][0], LIMIT_NAMES[k][1], rules.maxTai)) };
+    return { limit: true, items: allowed.map((k) => item(LIMIT_NAMES[k][0] + ' (Mǎn 滿 · limit)', LIMIT_NAMES[k][1], rules.maxTai)) };
   }
 
   function specialLimits(ctx) {
@@ -340,26 +339,31 @@
     if (lim) return Object.assign({ handType: 'Standard hand' }, lim);
 
     const items = [];
-    dragonPongs.forEach((s) => {
-      const d = DRAGON_INFO[TYPES[s.tile][1]];
-      items.push(item(d.en + (s.type === 'kong' ? ' Kong' : ' Pong'), d.zh, T.dragonPong));
-    });
+    // Xiao San Yuan 小三元: two dragon pongs plus a pair of the third dragon — 4 tai in place of the two dragon pongs.
+    if (dragonPongs.length === 2 && pair >= 31) {
+      items.push(item('Xiǎo Sān Yuán · Small Three Dragons', '小三元', T.xiaoSanYuan));
+    } else {
+      dragonPongs.forEach((s) => {
+        const d = DRAGON_INFO[TYPES[s.tile][1]];
+        items.push(item(d.py + ' ' + (s.type === 'kong' ? 'Gàng' : 'Pèng') + ' · ' + d.en + (s.type === 'kong' ? ' Kong' : ' Pong'), d.zh + (s.type === 'kong' ? '槓' : '碰'), T.dragonPong));
+      });
+    }
     windPongs.forEach((s) => {
       const w = TYPES[s.tile][1];
-      const word = WIND_INFO[w].en + ' Wind' + (s.type === 'kong' ? ' Kong' : ' Pong');
-      if (w === ctx.seat) items.push(item(word + ' (your seat wind)', WIND_INFO[w].zh, T.seatWindPong));
-      if (w === ctx.prevalent) items.push(item(word + ' (prevalent wind)', WIND_INFO[w].zh, T.prevalentWindPong));
+      const word = WIND_INFO[w].en + ' ' + WIND_INFO[w].zh + ' (' + WIND_INFO[w].py + ') Wind' + (s.type === 'kong' ? ' Kong' : ' Pong');
+      if (w === ctx.seat) items.push(item('Mén Fēng · ' + word + ', your seat wind', '門風 ' + WIND_INFO[w].zh, T.seatWindPong));
+      if (w === ctx.prevalent) items.push(item('Quān Fēng · ' + word + ', the round wind', '圈風 ' + WIND_INFO[w].zh, T.prevalentWindPong));
     });
-    if (pongs.length === 4) items.push(item('Pong Pong: all pongs', '對對胡', T.pongPong));
+    if (pongs.length === 4) items.push(item('Duì Duì Hú · All Pongs', '對對胡', T.pongPong));
     const allChows = sets.every((s) => s.type === 'chow');
     if (allChows && ctx.bonus.length === 0 && ctx.waits.length > 1) {
-      items.push(item('Ping Hu: all chis, no flowers or animals, multi-tile wait', '平胡', T.pingHu));
+      items.push(item('Píng Hú · All Chis: no flowers or animals, multi-tile wait', '平胡', T.pingHu));
     }
     // Ka Long 卡窿: the winning tile was the only wait and fills the middle of a chi from the hand.
     // It earns a tai only when self-drawn.
     const kaLong = ctx.waits.length === 1 && ctx.winIdx !== undefined
       && sets.some((s) => s.type === 'chow' && s.fromHand && s.tile + 1 === ctx.winIdx);
-    if (kaLong && ctx.selfDraw) items.push(item('Ka Long: self-drew the middle tile of a chi', '卡窿', T.kaLong));
+    if (kaLong && ctx.selfDraw) items.push(item('Kǎ Lóng · Self-drawn Middle-tile Win', '卡窿', T.kaLong));
     colourItems(indices, rules).forEach((i) => items.push(i));
     bonusItems(ctx.bonus, ctx.seat, rules).forEach((i) => items.push(i));
     contextItems(ctx, rules).forEach((i) => items.push(i));
@@ -374,7 +378,7 @@
     const lim = limitResult(limits, rules);
     if (lim) return Object.assign({ handType: 'Seven Pairs' }, lim);
     const items = [item(
-      'Seven Pairs (' + (ctx.selfDraw ? 'self-draw' : 'discard win') + ')',
+      'Qī Duì Zǐ · Seven Pairs (' + (ctx.selfDraw ? 'self-draw' : 'discard win') + ')',
       '七對子',
       ctx.selfDraw ? rules.tai.sevenPairsSelfDraw : rules.tai.sevenPairsDiscard,
     )];
@@ -429,6 +433,35 @@
     return evaluateWithFei(hand, rules);
   }
 
+  /**
+   * Splits a complete hand into its sets for display: [{ type: 'chi'|'pong'|'kong'|'pair', tiles, revealed? }].
+   * Returns null if the tiles do not form a winning shape.
+   */
+  function describeSets(hand) {
+    const melds = hand.melds || [];
+    const tiles = (hand.concealed || []).concat(hand.winningTile ? [hand.winningTile] : []);
+    if (!tiles.every(isPlayable)) return null;
+    const c = countsOf(tiles);
+    if (sum(c) !== 3 * (4 - melds.length) + 2) return null;
+    const groups = [];
+    const decs = standardDecompositions(c.slice());
+    if (decs.length) {
+      const d = decs[0];
+      d.sets.forEach((s) => groups.push(s.type === 'chow'
+        ? { type: 'chi', tiles: [TYPES[s.tile], TYPES[s.tile + 1], TYPES[s.tile + 2]] }
+        : { type: 'pong', tiles: [TYPES[s.tile], TYPES[s.tile], TYPES[s.tile]] }));
+      groups.push({ type: 'pair', tiles: [TYPES[d.pair], TYPES[d.pair]] });
+    } else if (isSevenPairs(c, melds.length)) {
+      c.forEach((n, i) => { if (n) groups.push({ type: 'pair', tiles: [TYPES[i], TYPES[i]] }); });
+    } else if (isThirteenWonders(c, melds.length)) {
+      groups.push({ type: 'wonders', tiles: sortTiles(tiles) });
+    } else {
+      return null;
+    }
+    melds.forEach((m) => groups.push({ type: m.type === 'chow' ? 'chi' : m.type, tiles: meldTiles(m), revealed: true }));
+    return groups;
+  }
+
   /** Tile types a Fei could usefully become: the tiles in hand and their neighbours. */
   function feiCandidates(real, many) {
     const set = new Set();
@@ -468,7 +501,7 @@
     if (!best) {
       return { status: 'invalid', message: 'Even with the Fei 飛 jokers, these tiles are not a winning hand.', waits: [] };
     }
-    return Object.assign({}, best.r, { feiAs: best.subs, items: best.r.items.concat([{ name: 'Fei 飛 used as ' + best.subs.map((s) => tileInfo(s).name).join(', '), zh: '飛', tai: 0 }]) });
+    return Object.assign({}, best.r, { feiAs: best.subs, items: best.r.items.concat([{ name: 'Fēi · Joker used as ' + best.subs.map((s) => tileInfo(s).name).join(', '), zh: '飛', tai: 0 }]) });
   }
 
   function evaluatePlain(hand, rules) {
@@ -526,8 +559,11 @@
     candidates.sort((a, b) => (b.limit - a.limit) || (b.rawTai - a.rawTai));
     const best = candidates[0];
     const tai = Math.min(best.rawTai, rules.maxTai);
-    const canWin = tai >= rules.minTai;
+    // 一台自摸: with this house rule a 1-tai hand must be self-drawn; off a discard it needs 2 tai.
+    const needsSelfDraw = !!rules.oneTaiZiMo && !ctx.selfDraw && tai < rules.minTai + 1 && tai >= rules.minTai;
+    const canWin = tai >= rules.minTai && !needsSelfDraw;
     return {
+      needsSelfDraw,
       status: 'ok',
       handType: best.handType,
       limit: best.limit,
@@ -764,6 +800,7 @@
     evaluateHand,
     instantPayouts,
     flowerBites,
+    describeSets,
     FEI,
     isFei,
     BITES,
