@@ -129,6 +129,43 @@
     setOneTaiZiMo(on) { this.rules = Object.assign({}, this.rules, { oneTaiZiMo: !!on }); }
     setDifficulty(d) { this.difficulty = d; }
 
+    // ---------- Choosing seats and the first banker ----------
+
+    /**
+     * Everyone rolls two dice; ties for the highest roll again. Returns
+     * { rounds: [[{ player, dice }]], highest, tiles } — tiles are the four winds, face down, in random order.
+     */
+    rollForSeats() {
+      const die = () => 1 + Math.floor(this.rand() * 6);
+      let contenders = [0, 1, 2, 3];
+      const rounds = [];
+      for (;;) {
+        const rolls = contenders.map((player) => ({ player, dice: [die(), die()] }));
+        rounds.push(rolls);
+        const total = (r) => r.dice[0] + r.dice[1];
+        const max = Math.max(...rolls.map(total));
+        const top = rolls.filter((r) => total(r) === max).map((r) => r.player);
+        if (top.length === 1) {
+          this.seating = { rounds, highest: top[0], tiles: shuffle(['wE', 'wS', 'wW', 'wN'], this.rand), picked: null };
+          return this.seating;
+        }
+        contenders = top;
+      }
+    }
+
+    /**
+     * The highest roller takes face-down wind tile `pos`. They sit at that wind; everyone else follows
+     * anticlockwise in wind order, and whoever sits East is the first banker (dealer 莊).
+     */
+    chooseSeatWind(pos) {
+      const s = this.seating;
+      const w = s.tiles[pos][1];
+      this.dealer = (s.highest - WINDS.indexOf(w) + 4) % 4;
+      s.picked = { pos, wind: w };
+      this.say(this.label(s.highest) + ' rolled highest and ' + this.verb(s.highest, 'draw', 'draws') + ' ' + windName(w) + '. ' + this.label(this.dealer) + ' ' + this.verb(this.dealer, 'sit', 'sits') + ' East 東 and ' + this.verb(this.dealer, 'are', 'is') + ' the first banker.');
+      return w;
+    }
+
     /** Manual dealing and drawing. Switching it off mid-hand finishes any step you were asked to do. */
     setManual(on) {
       this.manual = !!on && !!this.human;
@@ -448,7 +485,8 @@
         this.phase = 'humanTurn';
         return;
       }
-      if (opts.win) return this.endWin(i, true, null, this.players[i].hand[this.players[i].hand.length - 1]);
+      if (opts.win && this.botWantsWin(i, opts.evaluation, true)) return this.endWin(i, true, null, this.players[i].hand[this.players[i].hand.length - 1]);
+      if (opts.win) this.say(this.label(i) + ' could win but keeps building for a bigger hand.');
       if (opts.kongs.length) return this.doKong(i, opts.kongs[0]);
       this.phase = 'botDiscard';
     }
@@ -562,11 +600,81 @@
       return best;
     }
 
+    // ---------- Bot personalities ----------
+    // Beginner: races to any win — claims whatever keeps it moving and plays pure speed.
+    // Intermediate: aims for tai (colour, honour pongs) but is careless and throws risky tiles now and then.
+    // Advanced ('expert'): deliberately builds big hands, stays concealed, defends late,
+    // and turns down small wins early in the hand to keep building.
+
+    /** What a player's hand is shaping up to be: a colour hand, all pongs, honour pairs. */
+    planFor(i) {
+      const p = this.players[i];
+      const all = p.hand.filter(MJ.isPlayable).concat(...p.melds.map(MJ.meldTiles));
+      const suits = [0, 0, 0];
+      let honours = 0;
+      all.forEach((id) => { const k = MJ.TYPES.indexOf(id); if (k >= 27) honours++; else suits[Math.floor(k / 9)]++; });
+      const dom = suits.indexOf(Math.max(...suits));
+      const offSuit = suits.reduce((a, n, s) => a + (s === dom ? 0 : n), 0);
+      const c = MJ.countsOf(p.hand);
+      const pairsOrMore = c.filter((n) => n >= 2).length + p.melds.filter((m) => m.type !== 'chow').length;
+      const anyChow = p.melds.some((m) => m.type === 'chow');
+      return {
+        dom, suits, honours, offSuit,
+        colourPlan: suits[dom] + honours >= 8 && offSuit <= 5,
+        pongPlan: pairsOrMore >= 4 && !anyChow,
+      };
+    }
+
+    /** How good it is (for the hand's value) to throw this tile. Positive = throw it, negative = keep it. */
+    valueBonus(i, tile, plan) {
+      const k = MJ.TYPES.indexOf(tile);
+      const c = MJ.countsOf(this.players[i].hand);
+      let b = 0;
+      if (this.isValueTile(i, tile) && c[k] >= 2) b -= 60; // a dragon / own-wind pair: a tai in waiting
+      if (plan.colourPlan && k < 27 && Math.floor(k / 9) !== plan.dom) b += 35; // off-suit tile spoils a colour hand
+      if (plan.colourPlan && k < 27 && Math.floor(k / 9) === plan.dom) b -= 10;
+      if (plan.pongPlan && c[k] >= 2) b -= 30; // pairs are future pongs
+      if (plan.pongPlan && c[k] === 1 && k < 27) b += 10;
+      return b;
+    }
+
+    /** Does this bot take the win now? Advanced bots turn down small early wins to build a bigger hand. */
+    botWantsWin(i, ev, selfDraw) {
+      if (this.difficulty !== 'expert') return true;
+      if (ev.limit || ev.tai >= 3 || this.tilesLeft < 36) return true;
+      return selfDraw && ev.tai >= 2;
+    }
+
     botClaim(q, tile, opts) {
+      if (opts.win) {
+        if (this.botWantsWin(q, opts.evaluation, false)) return { player: q, type: 'win' };
+        if (this.difficulty === 'expert') this.say(this.label(q) + ' lets a small win go by, building for a bigger hand.');
+        if (this.difficulty === 'expert') return null;
+      }
+      const p = this.players[q];
+      const m = p.melds.length;
+      const base = MJ.shanten(MJ.countsOf(p.hand), m);
+      const afterPong = opts.pong ? bestAfterDiscard(without(p.hand, [tile, tile]), m + 1) : Infinity;
       if (this.difficulty === 'beginner') {
-        if (opts.win) return { player: q, type: 'win' };
-        if (opts.pong && this.isValueTile(q, tile) && this.rand() < 0.6) return { player: q, type: 'pong' };
-        return null;
+        // Speed only: grab anything that does not slow the hand down.
+        if (opts.kong) return { player: q, type: 'kong' };
+        if (opts.pong && afterPong <= base) return { player: q, type: 'pong' };
+        let best = null;
+        opts.chows.forEach((c) => { const after = bestAfterDiscard(without(p.hand, c.uses), m + 1); if (after <= base && (!best || after < best.after)) best = { player: q, type: 'chow', chow: c, after }; });
+        return best;
+      }
+      if (this.difficulty === 'expert') {
+        const plan = this.planFor(q);
+        const info = MJ.tileInfo(tile);
+        const fitsColour = plan.colourPlan && (info.kind !== 'suit' || MJ.SUITS.indexOf(info.suit) === plan.dom);
+        if ((opts.kong || opts.pong) && this.isValueTile(q, tile)) return { player: q, type: opts.kong ? 'kong' : 'pong' };
+        if (opts.pong && afterPong < base && (plan.pongPlan || fitsColour)) return { player: q, type: 'pong' };
+        if (fitsColour && !plan.pongPlan) {
+          let best = null;
+          opts.chows.forEach((c) => { const after = bestAfterDiscard(without(p.hand, c.uses), m + 1); if (after < base && (!best || after < best.after)) best = { player: q, type: 'chow', chow: c, after }; });
+          return best;
+        }
+        return null; // stay concealed for Men Qing and bigger hands
       }
       return this.suggestClaim(q, tile, opts);
     }
@@ -661,26 +769,32 @@
       const allowed = advice.status === 'ok' ? advice.options.filter((o) => this.canThrow(o.tile)) : [];
       if (!allowed.length) return this.discard(i, p.hand.find((x) => this.canThrow(x)) || p.hand[0]);
       const opts = allowed;
-      let pick = opts[0];
-      if (this.difficulty === 'beginner') {
-        // Beginner bots often miss the best discard.
-        const r = this.rand();
-        pick = opts[Math.min(opts.length - 1, r < 0.45 ? 0 : r < 0.7 ? 1 : r < 0.88 ? 2 : 3)];
+      const best = opts[0];
+      let pick = best;
+      if (this.difficulty === 'intermediate') {
+        // Aims for tai among the fastest discards, but is careless: now and then throws a risky tile.
+        const plan = this.planFor(i);
+        const pool = opts.filter((o) => o.shanten === best.shanten);
+        pool.sort((a, b) => (b.live * 6 + 0.5 * this.valueBonus(i, b.tile, plan)) - (a.live * 6 + 0.5 * this.valueBonus(i, a.tile, plan)));
+        pick = pool[0];
+        if (this.rand() < 0.2) pick = opts[Math.floor(this.rand() * Math.min(3, opts.length))];
       } else if (this.difficulty === 'expert') {
-        // Expert bots defend: when someone looks close to winning, prefer a safe tile that keeps pace.
+        // Builds a big hand: trades a little speed for tai, and defends once someone looks ready.
+        const plan = this.planFor(i);
+        const slack = this.tilesLeft > 70 && (plan.colourPlan || plan.pongPlan) ? 1 : 0;
         const danger = this.tilesLeft < 40 || this.players.some((o, j) => j !== i && o.melds.length >= 2);
-        if (danger) {
-          const seen = MJ.countsOf(this.seenBy(i).filter(MJ.isPlayable));
-          const safety = (o) => {
-            const t = MJ.TYPES.indexOf(o.tile);
-            const discardedByOthers = this.players.some((x, j) => j !== i && x.discards.includes(o.tile)) ? 3 : 0;
-            return seen[t] + discardedByOthers + (t >= 27 ? 1 : 0);
-          };
-          const keepPace = opts.filter((o) => o.shanten === opts[0].shanten && o.live >= opts[0].live * 0.6);
-          keepPace.sort((a, b) => safety(b) - safety(a));
-          pick = keepPace[0] || pick;
-        }
+        const seen = MJ.countsOf(this.seenBy(i).filter(MJ.isPlayable));
+        const safety = (o) => {
+          const t = MJ.TYPES.indexOf(o.tile);
+          const discardedByOthers = this.players.some((x, j) => j !== i && x.discards.includes(o.tile)) ? 3 : 0;
+          return seen[t] + discardedByOthers + (t >= 27 ? 1 : 0);
+        };
+        const score = (o) => -o.shanten * 400 + o.live * 3 + this.valueBonus(i, o.tile, plan) + (danger ? safety(o) * 15 : 0);
+        const pool = opts.filter((o) => o.shanten <= best.shanten + slack);
+        pool.sort((a, b) => score(b) - score(a));
+        pick = pool[0] || best;
       }
+      // Beginner: pure speed — always the most efficient tile.
       this.discard(i, pick.tile);
     }
 

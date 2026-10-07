@@ -7,9 +7,9 @@
   const Sound = window.Sound;
   const SETTINGS_KEY = 'howtomj.play.v2';
   const LEVELS = {
-    beginner: { label: 'Beginner', note: 'Bots play loosely and often miss the best tile.' },
-    intermediate: { label: 'Intermediate', note: 'Bots play sensibly and claim useful tiles.' },
-    expert: { label: 'Expert', note: 'Bots play to win and defend late in the hand.' },
+    beginner: { label: 'Beginner', note: 'Bots race to win as fast as they can: they claim anything useful and take any win.' },
+    intermediate: { label: 'Intermediate', note: 'Bots aim for higher tai (colour hands, dragon pongs) but throw risky tiles now and then.' },
+    expert: { label: 'Advanced', note: 'Bots build big hands on purpose, stay concealed, defend late — and will pass up a small win to go for a bigger one.' },
   };
   const CALL_TEXT = { pong: 'Pong! 碰', chi: 'Chi! 吃', kong: 'Kong! 槓', hu: 'Hu! 胡', zimo: 'Zi Mo! 自摸', bite: 'Bite! 咬' };
   const CALL_SOUND = { pong: 'pong', chi: 'chi', kong: 'kong', bite: 'flower' };
@@ -56,13 +56,95 @@
     });
     lastEvent = 0;
     setupOpen = false;
-    startHand();
+    beginSeating();
+  }
+
+  // ---------- Choosing seats and the first banker ----------
+
+  let seating = null; // { stage: 'pick' | 'auto' | 'done' }
+
+  function beginSeating() {
+    stopReplay();
+    replay = null;
+    game.rollForSeats();
+    Sound.play('dice');
+    const humanTop = game.players[game.seating.highest].isHuman;
+    seating = { stage: humanTop ? 'pick' : 'auto' };
+    if (!humanTop) {
+      setTimeout(() => {
+        if (!seating || seating.stage !== 'auto') return;
+        game.chooseSeatWind(Math.floor(Math.random() * 4));
+        seating.stage = 'done';
+        Sound.play('flower');
+        renderSeating();
+      }, 1800);
+    }
+    renderSettings();
+    renderSeating();
+  }
+
+  const faceDown = (extra, onclick, label) => el(onclick ? 'button' : 'span', { class: 'wind-back' + (extra ? ' ' + extra : ''), onclick, 'aria-label': label || 'Face-down wind tile' }, [el('span', { text: '?' })]);
+
+  function seatingView() {
+    const s = game.seating;
+    const total = (r) => r.dice[0] + r.dice[1];
+    const hi = game.label(s.highest);
+    const rounds = s.rounds.map((rolls, k) => el('div', { class: 'seat-roll-round' }, [
+      el('div', { class: 'hand-row__label', text: k === 0 ? 'Everyone rolls the dice' : 'A tie for highest — those players roll again' }),
+      el('div', { class: 'seat-rolls' }, rolls.map((r) => el('div', { class: 'seat-roll' + (k === s.rounds.length - 1 && r.player === s.highest ? ' is-top' : '') }, [
+        el('strong', { text: game.label(r.player) }),
+        el('span', { class: 'dice' }, r.dice.map((d) => dieEl(d, 'die--small'))),
+        el('span', { class: 'seat-roll__total', text: '= ' + total(r) }),
+      ]))),
+    ]));
+    let pick;
+    if (seating.stage === 'pick') {
+      pick = [
+        el('p', { class: 'prompt', text: 'You rolled highest! Pick one of the four face-down wind tiles — the wind you draw is where you sit.' }),
+        el('div', { class: 'wind-pick' }, s.tiles.map((_, pos) => faceDown('is-pickable', () => {
+          game.chooseSeatWind(pos);
+          seating.stage = 'done';
+          Sound.play('flower');
+          renderSeating();
+        }, 'Pick face-down wind tile ' + (pos + 1)))),
+      ];
+    } else if (seating.stage === 'auto') {
+      pick = [
+        el('p', { class: 'prompt', text: hi + ' rolled highest and is choosing a wind tile…' }),
+        el('div', { class: 'wind-pick' }, s.tiles.map(() => faceDown('is-thinking'))),
+      ];
+    } else {
+      const w = s.picked.wind;
+      pick = [
+        el('div', { class: 'wind-pick' }, s.tiles.map((id, pos) => (pos === s.picked.pos ? tileEl(id, { extra: 'is-best wind-revealed' }) : faceDown()))),
+        el('p', { class: 'prompt', text: hi + ' drew ' + windName(w) + ', so ' + (hi === 'You' ? 'you sit ' : hi + ' sits ') + windName(w) + '. Everyone else follows in wind order.' }),
+        el('ul', { class: 'seat-list' }, game.players.map((p, i) => el('li', { class: game.dealer === i ? 'is-banker' : '' }, [
+          el('strong', { text: game.label(i) }), el('span', { text: ' · ' + windName(game.seatOf(i)) }),
+          game.dealer === i ? el('span', { class: 'dealer-pill', text: 'First banker 莊' }) : null,
+        ]))),
+        el('div', { class: 'actions' }, [el('button', { class: 'btn btn--primary btn--big', onclick: () => { seating = null; startHand(); }, text: 'Start the game' })]),
+      ];
+    }
+    return el('section', { class: 'card seating' }, [
+      el('h2', { text: 'Choosing seats and the first banker' }),
+      el('p', { class: 'muted', text: 'Everyone rolls two dice. The highest roller draws one of the four winds face down: that wind is their seat, the others follow in wind order, and whoever sits East 東 is the first banker (dealer 莊).' }),
+      ...rounds,
+      ...pick,
+    ]);
+  }
+
+  function renderSeating() {
+    if (!boardHost || !game || !seating) return;
+    renderSettings();
+    boardHost.replaceChildren(seatingView());
   }
 
   function startHand() {
     stopReplay();
     replay = null;
     game.setManual(placement ? false : settings.manual);
+    customOrder = false;
+    handOrder = [];
     game.startHand();
     resetTurnUi();
     renderSettings();
@@ -91,7 +173,7 @@
   function tick() {
     clearTimeout(timer);
     try { render(); } catch (e) { console.error(e); } // a drawing error must never stall the game
-    if (!active || !game || setupOpen || game.needsHuman() || game.isOver()) return;
+    if (!active || !game || setupOpen || seating || game.needsHuman() || game.isOver()) return;
     timer = setTimeout(() => {
       game.advance();
       tick();
@@ -266,9 +348,9 @@
 
   function statusBar() {
     return el('div', { class: 'table-bar' }, [
-      el('span', {}, [el('strong', { text: placement ? '🀄 Placement match · hand ' + game.handNo + ' of ' + placement.total : 'Hand ' + game.handNo }), ' · Round wind ' + windName(game.prevalent)]),
+      el('span', {}, [el('strong', { text: seating ? 'Choosing seats' : placement ? '🀄 Placement match · hand ' + game.handNo + ' of ' + placement.total : 'Hand ' + game.handNo }), ' · Round wind ' + windName(game.prevalent)]),
       canFullscreen() ? el('button', { class: 'btn btn--ghost fs-btn', onclick: toggleFullscreen, title: isFullscreen() ? 'Exit full screen (Esc)' : 'Play in full screen', text: isFullscreen() ? '✕ Exit full screen' : '⛶ Full screen' }) : null,
-      el('button', { class: 'btn btn--ghost', onclick: () => { if (confirm('Start a new game? Everyone goes back to 300 chips.')) { game = null; placement = null; stopReplay(); clearTimeout(timer); setupOpen = true; renderSetup(); } }, text: 'New game' }),
+      el('button', { class: 'btn btn--ghost', onclick: () => { if (confirm('Start a new game? Everyone goes back to 300 chips.')) { game = null; placement = null; seating = null; stopReplay(); clearTimeout(timer); setupOpen = true; renderSetup(); } }, text: 'New game' }),
     ]);
   }
 
@@ -352,8 +434,8 @@
     if (r.type === 'draw') return el('div', { class: 'win-banner win-banner--draw' }, [el('strong', { text: 'Draw 流局' }), el('span', { text: 'The wall ran out. Nobody pays.' })]);
     const ev = r.evaluation;
     return el('div', { class: 'win-banner' }, [
-      el('strong', { text: (r.selfDraw ? 'Zi Mo 自摸! ' : 'Hu 胡! ') + game.label(r.winner) }),
-      el('span', { text: ev.tai + ' tai · ' + (r.selfDraw ? ev.payout.each + ' chips from each player' : ev.payout.shooterPays + ' chips from ' + game.label(r.shooter)) }),
+      el('strong', { text: game.label(r.winner) + ' Hu! 胡' }),
+      el('span', { text: (r.selfDraw ? 'Zi Mo 自摸 (self-draw) · ' : '') + ev.tai + ' tai' + (ev.tai >= 5 ? ' Mǎn 滿' : '') + ' · ' + (r.selfDraw ? ev.payout.each + ' chips from each player' : ev.payout.shooterPays + ' chips from ' + game.label(r.shooter)) }),
     ]);
   }
 
@@ -388,10 +470,11 @@
     let rest = h.hand.slice();
     let drawn = null;
     if (myTurn && game.drawn && rest[rest.length - 1] === game.drawn) drawn = rest.pop();
-    rest = MJ.sortTiles(rest);
+    rest = orderedHand(rest);
     const blocked = (id) => myTurn && !game.canThrow(id);
     const tileFor = (id, key) => tileEl(id, {
       onclick: myTurn ? () => {
+        if (justDragged) return;
         if (blocked(id)) { hintShown = { text: 'You cannot throw ' + MJ.tileName(id) + ' straight after your claim: it would make the same set you just claimed. Throw a different tile.' }; render(); return; }
         if (selected === key) act(() => game.humanDiscard(id));
         else { selected = key; selectedId = id; Sound.play('tap'); render(); }
@@ -399,13 +482,104 @@
       ariaPrefix: myTurn ? (blocked(id) ? 'Cannot throw ' : 'Throw ') : '',
       extra: [selected === key ? 'is-selected' : '', hint && hint.type === 'discard' && hint.tile === id ? 'is-best' : '', MJ.isBonus(id) ? 'is-bonus' : '', blocked(id) ? 'is-blocked' : ''].join(' '),
     });
-    const tiles = rest.map((id, k) => tileFor(id, 'h' + k));
+    const tiles = rest.map((id, k) => { const t = tileFor(id, 'h' + k); t.dataset.idx = String(k); return t; });
+    const row = el('div', { class: 'tiles' }, tiles.concat(drawn ? [el('span', { class: 'my-hand__drawn', title: 'The tile you just drew' }, [tileFor(drawn, 'drawn')])] : []));
+    enableDrag(row, rest);
     return el('section', { class: 'seat seat--me' + (myTurn ? ' is-turn' : ''), 'aria-label': 'Your hand' }, [
-      el('div', { class: 'hand-row__label', text: 'Your hand · ' + windName(game.seatOf(h.index)) }),
-      el('div', { class: 'my-hand' }, [
-        el('div', { class: 'tiles' }, tiles.concat(drawn ? [el('span', { class: 'my-hand__drawn', title: 'The tile you just drew' }, [tileFor(drawn, 'drawn')])] : [])),
+      el('div', { class: 'hand-head' }, [
+        el('span', { class: 'hand-row__label', text: 'Your hand · ' + windName(game.seatOf(h.index)) }),
+        el('span', { class: 'hand-head__tip', text: 'Drag tiles to rearrange' }),
+        customOrder ? el('button', { class: 'btn btn--ghost btn--small', onclick: () => { customOrder = false; handOrder = []; render(); }, text: 'Sort' }) : null,
       ]),
+      el('div', { class: 'my-hand' }, [row]),
     ]);
+  }
+
+  // ---------- Rearranging your hand ----------
+
+  let handOrder = []; // your own arrangement, once you have dragged a tile
+  let customOrder = false;
+  let dragActive = false;
+  let renderPending = false;
+  let justDragged = false;
+
+  /** Your tiles in your chosen order. Tiles you have not placed yet (new draws) go on the end. */
+  function orderedHand(ids) {
+    if (!customOrder) { handOrder = MJ.sortTiles(ids); return handOrder.slice(); }
+    const pool = ids.slice();
+    const out = [];
+    handOrder.forEach((id) => { const k = pool.indexOf(id); if (k >= 0) { out.push(id); pool.splice(k, 1); } });
+    out.push(...MJ.sortTiles(pool));
+    handOrder = out.slice();
+    return out;
+  }
+
+  function dropIndex(row, x, y) {
+    const nodes = [...row.querySelectorAll('.tile[data-idx]')];
+    let best = 0;
+    let bestD = Infinity;
+    nodes.forEach((n, k) => {
+      const r = n.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const d = Math.hypot(cx - x, r.top + r.height / 2 - y);
+      if (d < bestD) { bestD = d; best = x > cx ? k + 1 : k; }
+    });
+    return best;
+  }
+
+  /** Drag (mouse or finger) a tile to a new place in your hand. A plain tap still selects/throws. */
+  function enableDrag(row, current) {
+    row.querySelectorAll('.tile[data-idx]').forEach((node) => {
+      node.addEventListener('pointerdown', (e) => {
+        if (e.button > 0) return;
+        const from = Number(node.dataset.idx);
+        const sx = e.clientX;
+        const sy = e.clientY;
+        let ghost = null;
+        let marker = null;
+        const move = (ev) => {
+          if (!ghost && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) {
+            dragActive = true;
+            node.classList.add('is-dragging');
+            ghost = node.cloneNode(true);
+            ghost.classList.add('drag-ghost');
+            document.body.appendChild(ghost);
+          }
+          if (!ghost) return;
+          ev.preventDefault();
+          ghost.style.left = ev.clientX - node.offsetWidth / 2 + 'px';
+          ghost.style.top = ev.clientY - node.offsetHeight / 2 + 'px';
+          const to = dropIndex(row, ev.clientX, ev.clientY);
+          if (marker) marker.classList.remove('drop-before', 'drop-after');
+          const nodes = row.querySelectorAll('.tile[data-idx]');
+          marker = nodes[Math.min(to, nodes.length - 1)];
+          if (marker) marker.classList.add(to >= nodes.length ? 'drop-after' : 'drop-before');
+        };
+        const up = (ev) => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointercancel', up);
+          if (!ghost) return;
+          ghost.remove();
+          let to = dropIndex(row, ev.clientX, ev.clientY);
+          const arr = current.slice();
+          const [tile] = arr.splice(from, 1);
+          if (to > from) to--;
+          arr.splice(to, 0, tile);
+          handOrder = arr;
+          customOrder = true;
+          dragActive = false;
+          justDragged = true;
+          setTimeout(() => { justDragged = false; }, 60);
+          Sound.play('tap');
+          renderPending = false;
+          render();
+        };
+        window.addEventListener('pointermove', move, { passive: false });
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
+      });
+    });
   }
 
   function hintBox() {
@@ -724,6 +898,8 @@
   function render() {
     if (!boardHost) return;
     if (setupOpen || !game) return;
+    if (seating) return renderSeating();
+    if (dragActive) { renderPending = true; return; } // don't rebuild the hand while a tile is being dragged
     processEvents();
     ensureAutoHint();
     if (replay) {

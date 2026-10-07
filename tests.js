@@ -404,6 +404,34 @@
     eq(g.players.reduce((a, p) => a + p.chips, 0), 1200, 'chips');
   });
 
+  test('Seats: the highest roller draws a wind; whoever sits East is the first banker', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const g = new window.MJGame.Game({ seed });
+      const s = g.rollForSeats();
+      const last = s.rounds[s.rounds.length - 1];
+      const top = Math.max(...last.map((r) => r.dice[0] + r.dice[1]));
+      eq(last.filter((r) => r.dice[0] + r.dice[1] === top).length, 1, 'one clear highest roller');
+      eq([...s.tiles].sort(), ['wE', 'wN', 'wS', 'wW']);
+      const pos = seed % 4;
+      const w = g.chooseSeatWind(pos);
+      eq(g.seatOf(s.highest), w, 'highest roller sits at the wind they drew');
+      eq(g.seatOf(g.dealer), 'E', 'banker sits East');
+    }
+  });
+
+  test('Advanced bots pass up small early wins; other levels always win', () => {
+    const g = new window.MJGame.Game({ seed: 2, difficulty: 'expert' });
+    g.startHand();
+    const small = { tai: 1, limit: false };
+    eq(g.botWantsWin(1, small, false), g.tilesLeft < 36, 'expert: 1 tai early');
+    eq(g.botWantsWin(1, { tai: 3, limit: false }, false), true, 'expert: 3 tai');
+    eq(g.botWantsWin(1, { tai: 1, limit: true }, false), true, 'expert: limit hand');
+    g.setDifficulty('beginner');
+    eq(g.botWantsWin(1, small, false), true, 'beginner always wins');
+    g.setDifficulty('intermediate');
+    eq(g.botWantsWin(1, small, false), true, 'intermediate always wins');
+  });
+
   test('No swapping after a Chi or Pong', () => {
     const g = new window.MJGame.Game({ seed: 1 });
     eq(g.swapForbidden('chow', 'd6', { start: 'd4' }), ['d6', 'd3'], 'eat the 6 into 4-5-6');
